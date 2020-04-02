@@ -142,9 +142,10 @@ private:
 	{
 		FcInit ();
 		auto config = FcInitLoadConfigAndFonts ();
-		if (!X11::Frame::resourcePath.empty ())
+		const UTF8String& resourcePath = X11::Frame::getResourcePath ();
+		if (!resourcePath.empty ())
 		{
-			auto fontDir = X11::Frame::resourcePath + "Fonts/";
+			auto fontDir = resourcePath + "Fonts/";
 			FcConfigAppFontAddDir (config, reinterpret_cast<const FcChar8*> (fontDir.data ()));
 		}
 

@@ -9,6 +9,10 @@
 #include <memory>
 #include <vector>
 
+#if LINUX
+#include "x11platform.h"
+#endif
+
 //------------------------------------------------------------------------
 namespace VSTGUI {
 namespace Cairo {
@@ -128,15 +132,6 @@ private:
 } // CairoBitmapPrivate
 
 //-----------------------------------------------------------------------------
-Bitmap::GetResourcePathFunc Bitmap::getResourcePath = [] () { return std::string (); };
-
-//-----------------------------------------------------------------------------
-void Bitmap::setGetResourcePathFunc (GetResourcePathFunc&& func)
-{
-	getResourcePath = std::move (func);
-}
-
-//-----------------------------------------------------------------------------
 Bitmap::Bitmap (const CPoint* _size)
 {
 	if (_size)
@@ -219,6 +214,16 @@ double Bitmap::getScaleFactor () const
 {
 	return scaleFactor;
 }
+
+//-----------------------------------------------------------------------------
+#if LINUX
+std::string Bitmap::getResourcePath ()
+{
+	auto path = X11::Platform::getInstance ().getPath ();
+	path += "/Contents/Resources/";
+	return path;
+}
+#endif
 
 //-----------------------------------------------------------------------------
 namespace CairoBitmapPrivate {
