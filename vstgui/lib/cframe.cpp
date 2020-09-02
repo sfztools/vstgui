@@ -5,6 +5,7 @@
 #include "cframe.h"
 #include "coffscreencontext.h"
 #include "ctooltipsupport.h"
+#include "cinvalidrectlist.h"
 #include "itouchevent.h"
 #include "iscalefactorchangedlistener.h"
 #include "idatapackage.h"
@@ -36,7 +37,7 @@ private:
 	using InvalidRects = std::vector<CRect>;
 
 	SharedPointer<CFrame> frame;
-	InvalidRects invalidRects;
+	CInvalidRectList invalidRects;
 	uint32_t lastTicks;
 #if VSTGUI_LOG_COLLECT_INVALID_RECTS
 	uint32_t numAddedRects;
@@ -343,10 +344,10 @@ void CFrame::clearMouseViews (const CPoint& where, const CButtonState& buttons, 
 		if (callMouseExit)
 		{
 			lp = where;
-			(*it)->frameToLocal (lp);
+			lp = (*it)->translateToLocal (lp);
 			(*it)->onMouseExited (lp, buttons);
 		#if DEBUG_MOUSE_VIEWS
-			DebugPrint ("mouseExited : %p\n", (*it));
+			DebugPrint ("mouseExited : %p[%d,%d]\n", (*it), (int)lp.x, (int)lp.y);
 		#endif
 		}
 		if (pImpl->tooltips)
@@ -413,11 +414,11 @@ void CFrame::checkMouseViews (const CPoint& where, const CButtonState& buttons)
 	if (vc == nullptr && currentMouseView)
 	{
 		lp = where;
-		currentMouseView->frameToLocal (lp);
+		lp = currentMouseView->translateToLocal (lp);
 		currentMouseView->onMouseExited (lp, buttons);
 		callMouseObserverMouseExited (currentMouseView);
 	#if DEBUG_MOUSE_VIEWS
-		DebugPrint ("mouseExited : %p\n", currentMouseView);
+		DebugPrint ("mouseExited : %p[%d,%d]\n", currentMouseView, (int)lp.x, (int)lp.y);
 	#endif
 		currentMouseView->forget ();
 		pImpl->mouseViews.remove (currentMouseView);
@@ -431,11 +432,11 @@ void CFrame::checkMouseViews (const CPoint& where, const CButtonState& buttons)
 		if (vc->isChild (mouseView, true) == false)
 		{
 			lp = where;
-			vc->frameToLocal (lp);
+			lp = vc->translateToLocal (lp);
 			vc->onMouseExited (lp, buttons);
 			callMouseObserverMouseExited (vc);
 		#if DEBUG_MOUSE_VIEWS
-			DebugPrint ("mouseExited : %p\n", vc);
+			DebugPrint ("mouseExited : %p[%d,%d]\n", vc, (int)lp.x, (int)lp.y);
 		#endif
 			vc->forget ();
 			pImpl->mouseViews.erase (--it.base ());
@@ -461,11 +462,11 @@ void CFrame::checkMouseViews (const CPoint& where, const CButtonState& buttons)
 		while (it2 != pImpl->mouseViews.end ())
 		{
 			lp = where;
-			(*it2)->frameToLocal (lp);
+			lp = (*it2)->translateToLocal (lp);
 			(*it2)->onMouseEntered (lp, buttons);
 			callMouseObserverMouseEntered ((*it2));
 		#if DEBUG_MOUSE_VIEWS
-			DebugPrint ("mouseEntered : %p\n", (*it2));
+			DebugPrint ("mouseEntered : %p[%d,%d]\n", (*it2), (int)lp.x, (int)lp.y);
 		#endif
 			++it2;
 		}
@@ -486,11 +487,11 @@ void CFrame::checkMouseViews (const CPoint& where, const CButtonState& buttons)
 		while (it2 != pImpl->mouseViews.end ())
 		{
 			lp = where;
-			(*it2)->frameToLocal (lp);
+			lp = (*it2)->translateToLocal (lp);
 			(*it2)->onMouseEntered (lp, buttons);
 			callMouseObserverMouseEntered ((*it2));
 		#if DEBUG_MOUSE_VIEWS
-			DebugPrint ("mouseEntered : %p\n", (*it2));
+			DebugPrint ("mouseEntered : %p[%d,%d]\n", (*it2), (int)lp.x, (int)lp.y);
 		#endif
 			++it2;
 		}
@@ -598,15 +599,10 @@ CMouseEventResult CFrame::onMouseMoved (CPoint &where, const CButtonState& butto
 		auto it = pImpl->mouseViews.rbegin ();
 		while (it != pImpl->mouseViews.rend ())
 		{
-			CPoint p = where2;
-			auto parent = (*it)->getParentView ();
-			if (parent)
-			{
-				parent->frameToLocal (p);
-				result = (*it)->onMouseMoved (p, buttons2);
-				if (result == kMouseEventHandled)
-					break;
-			}
+			CPoint p = (*it)->translateToLocal (where2);
+			result = (*it)->onMouseMoved (p, buttons2);
+			if (result == kMouseEventHandled)
+				break;
 			++it;
 		}
 	}
@@ -1948,7 +1944,7 @@ CFrame::CollectInvalidRects::~CollectInvalidRects () noexcept
 //-----------------------------------------------------------------------------
 void CFrame::CollectInvalidRects::flush ()
 {
-	if (!invalidRects.empty ())
+	if (!invalidRects.data ().empty ())
 	{
 		if (frame->isVisible () && frame->pImpl->platformFrame)
 		{
@@ -1969,30 +1965,7 @@ void CFrame::CollectInvalidRects::addRect (const CRect& rect)
 #if VSTGUI_LOG_COLLECT_INVALID_RECTS
 	numAddedRects++;
 #endif
-	bool add = true;
-	for (auto it = invalidRects.begin (), end = invalidRects.end (); it != end; ++it)
-	{
-		if (it->rectInside (rect))
-		{
-			add = false;
-			break;
-		}
-		
-		CRect r (rect);
-		if (r.bound (*it) == rect)
-		{
-			add = false;
-			break;
-		}
-		r = *it;
-		if (r.bound (rect) == *it)
-		{
-			invalidRects.erase (it);
-			break;
-		}
-	}
-	if (add)
-		invalidRects.emplace_back (rect);
+	invalidRects.add (rect);
 	uint32_t now = frame->getTicks ();
 	if (now - lastTicks > 16)
 	{
