@@ -4,18 +4,19 @@
 
 #include "../../cfileselector.h"
 #include <unistd.h>
-#include <spawn.h>
 #include <sys/wait.h>
 #include <string>
 #include <vector>
 #include <memory>
 #include <cerrno>
+#include <cassert>
 extern "C" { extern char **environ; }
 
 //------------------------------------------------------------------------
 namespace VSTGUI {
 namespace X11 {
 
+static constexpr auto kdialogpath = "/usr/bin/kdialog";
 static constexpr auto zenitypath = "/usr/bin/zenity";
 
 //------------------------------------------------------------------------
@@ -23,6 +24,7 @@ struct FileSelector : CNewFileSelector
 {
 	FileSelector (CFrame* parent, Style style) : CNewFileSelector (parent), style (style)
 	{
+		identifiyExDialogType ();
 	}
 
 	~FileSelector ()
@@ -33,7 +35,16 @@ struct FileSelector : CNewFileSelector
 	bool runInternal (CBaseObject* delegate) override
 	{
 		this->delegate = delegate;
-		return runZenity ();
+		switch (exDialogType)
+		{
+			case ExDialogType::kdialog:
+				return runKDialog ();
+			case ExDialogType::zenity:
+				return runZenity ();
+			case ExDialogType::none:
+				break;
+		}
+		return false;
 	}
 
 	void cancelInternal () override { closeProcess (); }
@@ -43,7 +54,7 @@ struct FileSelector : CNewFileSelector
 		if (runInternal (nullptr))
 		{
 			std::string path;
-			path.reserve(1024);
+			path.reserve (1024);
 
 			ssize_t count;
 			char buffer[1024];
@@ -68,13 +79,55 @@ struct FileSelector : CNewFileSelector
 	}
 
 private:
+	enum class ExDialogType
+	{
+		none,
+		kdialog,
+		zenity
+	};
+
+	void identifiyExDialogType ()
+	{
+		if (access (zenitypath, X_OK) != -1)
+			exDialogType = ExDialogType::zenity;
+		if (access (kdialogpath, X_OK) != -1)
+			exDialogType = ExDialogType::kdialog;
+	}
+
+	bool runKDialog ()
+	{
+		std::vector<std::string> args;
+		args.reserve (16);
+		args.push_back (kdialogpath);
+		if (style == Style::kSelectFile) {
+			args.push_back ("--getopenfilename");
+			args.push_back ("--separate-output");
+		}
+		else if (style == Style::kSelectSaveFile)
+			args.push_back ("--getsavefilename");
+		else if (style == Style::kSelectDirectory)
+			args.push_back ("--getexistingdirectory");
+		if (allowMultiFileSelection)
+			args.push_back ("--multiple");
+		if (!title.empty ()) {
+			args.push_back ("--title");
+			args.push_back (title.getString ());
+		}
+		if (!initialPath.empty ())
+			args.push_back (initialPath.getString ());
+		if (startProcess (convertToArgv(args).data ()))
+		{
+			return true;
+		}
+		return false;
+	}
+
 	bool runZenity ()
 	{
 		std::vector<std::string> args;
-
+		args.reserve (16);
 		args.push_back (zenitypath);
 		args.push_back ("--file-selection");
-
 		if (style == Style::kSelectDirectory)
 			args.push_back ("--directory");
 		else if (style == Style::kSelectSaveFile)
@@ -86,35 +139,24 @@ private:
 			args.push_back ("--title=" + title.getString ());
 		if (!initialPath.empty ())
 			args.push_back ("--filename=" + initialPath.getString ());
-
-		std::vector<char*> argv (args.size () + 1);
-		for (size_t i = 0, n = args.size (); i < n; ++i)
-			argv[i] = const_cast<char*>(args[i].c_str ());
-
-		if (startProcess (argv.data()))
+		if (startProcess (convertToArgv(args).data ()))
 		{
 			return true;
 		}
 		return false;
 	}
 
+	static std::vector<char*> convertToArgv (const std::vector<std::string>& args)
+	{
+		std::vector<char*> argv (args.size () + 1);
+		for (size_t i = 0, n = args.size (); i < n; ++i)
+			argv[i] = const_cast<char*>(args[i].c_str ());
+		return argv;
+	}
+
 	bool startProcess (char* argv[])
 	{
-		closeProcess();
-
-		SpawnAttrPtr attr { new posix_spawnattr_t };
-		if (posix_spawnattr_init (attr.get ()) != 0)
-		{
-			delete attr.release ();
-			return false;
-		}
-
-		SpawnActionsPtr actions { new posix_spawn_file_actions_t };
-		if (posix_spawn_file_actions_init (actions.get ()) != 0)
-		{
-			delete actions.release ();
-			return false;
-		}
+		closeProcess ();
 
 		struct PipePair
 		{
@@ -143,18 +185,20 @@ private:
 				continue;
 			cleanEnviron.push_back (*envp);
 		}
-		cleanEnviron.push_back(nullptr);
+		cleanEnviron.push_back (nullptr);
 		char** envp = cleanEnviron.data ();
 #endif
 
-		if (posix_spawnattr_setflags(attr.get (), POSIX_SPAWN_USEVFORK) != 0 ||
-			posix_spawn_file_actions_adddup2 (actions.get (), rw.fd[1], STDOUT_FILENO) != 0)
-		{
+		pid_t forkPid = vfork ();
+		if (forkPid == -1)
 			return false;
+
+		if (forkPid == 0) {
+			execute (argv, envp, rw.fd);
+			assert (false);
 		}
 
-		if (posix_spawn(&spawnPid, zenitypath, actions.get (), attr.get (), argv, envp) != 0)
-			return false;
+		spawnPid = forkPid;
 
 		close (rw.fd[1]);
 		rw.fd[1] = -1;
@@ -162,6 +206,17 @@ private:
 		rw.fd[0] = -1;
 
 		return true;
+	}
+
+	[[noreturn]]
+	static void execute (char* argv[], char* envp[], const int pipeFd[2])
+	{
+		close (pipeFd[0]);
+		if (dup2 (pipeFd[1], STDOUT_FILENO) == -1)
+			_exit (1);
+		close (pipeFd[1]);
+		execve (argv[0], argv, envp);
+		_exit (1);
 	}
 
 	void closeProcess ()
@@ -183,28 +238,11 @@ private:
 		}
 	}
 
-	pid_t spawnPid = -1;
-	int readerFd = -1;
-
 	Style style;
 	SharedPointer<CBaseObject> delegate;
-
-	struct PosixSpawnDeleter {
-	public:
-		void operator()(posix_spawnattr_t* attr)
-		{
-			posix_spawnattr_destroy(attr);
-			delete attr;
-		}
-		void operator()(posix_spawn_file_actions_t* actions)
-		{
-			posix_spawn_file_actions_destroy(actions);
-			delete actions;
-		}
-	};
-
-	typedef std::unique_ptr<posix_spawnattr_t, PosixSpawnDeleter> SpawnAttrPtr;
-	typedef std::unique_ptr<posix_spawn_file_actions_t, PosixSpawnDeleter> SpawnActionsPtr;
+	ExDialogType exDialogType{ExDialogType::none};
+	pid_t spawnPid = -1;
+	int readerFd = -1;
 };
 
 //------------------------------------------------------------------------
