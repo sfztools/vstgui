@@ -25,6 +25,15 @@ enum class PlatformType : int32_t {
 	kDefaultNative = -1
 };
 
+static constexpr PlatformType kHWND = PlatformType::kHWND;
+static constexpr PlatformType kWindowRef = PlatformType::kWindowRef;
+static constexpr PlatformType kNSView = PlatformType::kNSView;
+static constexpr PlatformType kUIView = PlatformType::kUIView;
+static constexpr PlatformType kHWNDTopLevel = PlatformType::kHWNDTopLevel;
+static constexpr PlatformType kX11EmbedWindowID = PlatformType::kX11EmbedWindowID;
+static constexpr PlatformType kGdkWindow = PlatformType::kGdkWindow;
+static constexpr PlatformType kDefaultNative = PlatformType::kDefaultNative;
+
 //-----------------------------------------------------------------------------
 // Callback interface from IPlatformFrame implementations
 //-----------------------------------------------------------------------------
