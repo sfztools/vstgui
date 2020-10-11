@@ -115,7 +115,7 @@ private:
 		}
 		if (!initialPath.empty ())
 			args.push_back (initialPath.getString ());
-		if (startProcess (convertToArgv(args).data ()))
+		if (startProcess (convertToArgv (args).data ()))
 		{
 			return true;
 		}
@@ -139,7 +139,7 @@ private:
 			args.push_back ("--title=" + title.getString ());
 		if (!initialPath.empty ())
 			args.push_back ("--filename=" + initialPath.getString ());
-		if (startProcess (convertToArgv(args).data ()))
+		if (startProcess (convertToArgv (args).data ()))
 		{
 			return true;
 		}

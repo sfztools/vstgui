@@ -57,6 +57,7 @@ struct FreeTypeFontFace
 
 	bool valid () const { return face != nullptr; }
 	operator FT_Face () const { return face; }
+
 private:
 	void destroy ()
 	{
@@ -181,11 +182,10 @@ public:
 		return found;
 	}
 
-	std::list<std::string> getAllFontFamilies()
+	bool getAllFontFamilies(const FontFamilyCallback& callback)
 	{
-		std::list<std::string> fontFamilyNames;
 		if (!fcConfig)
-			return fontFamilyNames;
+			return false;
 		std::set<std::string> fontFamilyKnown;
 		FcPattern* pattern = nullptr;
 		FcObjectSet* objectSet = nullptr;
@@ -201,8 +201,11 @@ public:
 				if (FcPatternGetString (font, FC_FAMILY, 0, &family) == FcResultMatch)
 				{
 					std::string familyStr (reinterpret_cast<const char*> (family));
-					if (fontFamilyKnown.insert(familyStr).second)
-						fontFamilyNames.push_back(std::move(familyStr));
+					if (fontFamilyKnown.insert (familyStr).second)
+					{
+						if (!callback (familyStr))
+							break;
+					}
 				}
 			}
 		}
@@ -212,7 +215,7 @@ public:
 			FcObjectSetDestroy (objectSet);
 		if (pattern)
 			FcPatternDestroy (pattern);
-		return fontFamilyNames;
+		return true;
 	}
 
 private:
@@ -352,9 +355,7 @@ Font::Font (UTF8StringPtr name, const CCoord& size, const int32_t& style)
 }
 
 //------------------------------------------------------------------------
-Font::~Font ()
-{
-}
+Font::~Font () {}
 
 //------------------------------------------------------------------------
 bool Font::valid () const
@@ -408,7 +409,7 @@ void Font::drawString (CDrawContext* context, IPlatformString* string, const CPo
 				const auto& cr = cairoContext->getCairo ();
 				auto alpha = color.normAlpha<double> () * cairoContext->getGlobalAlpha ();
 				cairo_set_source_rgba (cr, color.normRed<double> (), color.normGreen<double> (),
-				                       color.normBlue<double> (), alpha);
+									   color.normBlue<double> (), alpha);
 				cairo_move_to (cr, p.x, p.y);
 				cairo_set_scaled_font (cr, impl->font);
 				cairo_show_text (cr, linuxString->get ().data ());
@@ -430,23 +431,11 @@ CCoord Font::getStringWidth (CDrawContext* context, IPlatformString* string, boo
 }
 
 //------------------------------------------------------------------------
+bool Font::getAllFamilies (const FontFamilyCallback& callback)
+{
+	return Cairo::FontList::instance ().getAllFontFamilies (callback);
+}
+
+//------------------------------------------------------------------------
 } // Cairo
-
-//------------------------------------------------------------------------
-SharedPointer<IPlatformFont> IPlatformFont::create (const UTF8String& name, const CCoord& size, const int32_t& style)
-{
-	auto font = owned (new Cairo::Font (name, size, style));
-	if (!font->valid ())
-		font = nullptr;
-	return font;
-}
-
-//------------------------------------------------------------------------
-bool IPlatformFont::getAllPlatformFontFamilies (std::list<std::string>& fontFamilyNames)
-{
-	fontFamilyNames = Cairo::FontList::instance ().getAllFontFamilies ();
-	return true;
-}
-
-//------------------------------------------------------------------------
 } // VSTGUI

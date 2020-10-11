@@ -3,6 +3,8 @@
 // distribution and at http://github.com/steinbergmedia/vstgui/LICENSE
 
 #include "x11frame.h"
+#include "x11dragging.h"
+#include "x11utils.h"
 #include "../../cbuttonstate.h"
 #include "../../cframe.h"
 #include "../../crect.h"
@@ -36,21 +38,6 @@
 namespace VSTGUI {
 namespace X11 {
 namespace {
-
-//------------------------------------------------------------------------
-std::string getAtomName (xcb_atom_t atom)
-{
-	std::string name;
-	auto xcb = RunLoop::instance ().getXcbConnection ();
-	auto cookie = xcb_get_atom_name (xcb, atom);
-	if (auto reply = xcb_get_atom_name_reply (xcb, cookie, nullptr))
-	{
-		auto length = xcb_get_atom_name_name_length (reply);
-		name = xcb_get_atom_name_name (reply);
-		free (reply);
-	}
-	return name;
-}
 
 //------------------------------------------------------------------------
 inline CButtonState translateMouseButtons (xcb_button_t value)
@@ -272,10 +259,11 @@ struct Frame::Impl : IFrameEventHandler
 	RectList dirtyRects;
 	CCursorType currentCursor {kCursorDefault};
 	uint32_t pointerGrabed {0};
+	XdndHandler dndHandler;
 
 	//------------------------------------------------------------------------
 	Impl (::Window parent, CPoint size, IPlatformFrameCallback* frame)
-	: window (parent, size), drawHandler (window), frame (frame)
+	: window (parent, size), drawHandler (window), frame (frame), dndHandler (&window, frame)
 	{
 		RunLoop::instance ().registerWindowEventHandler (window.getID (), this);
 	}
@@ -504,8 +492,13 @@ struct Frame::Impl : IFrameEventHandler
 #endif
 	}
 
+	void onEvent (xcb_selection_notify_event_t& event) override
+	{
+		dndHandler.selectionNotify (event);
+	}
+
 	//------------------------------------------------------------------------
-	void onEvent (xcb_client_message_event_t& event) override
+	void onEvent (xcb_client_message_event_t& event, xcb_window_t proxyId = 0) override
 	{
 		if (Atoms::xEmbed.valid () && event.type == Atoms::xEmbed ())
 		{
@@ -555,6 +548,22 @@ struct Frame::Impl : IFrameEventHandler
 				case XEMBED::REQUEST_FOCUS:
 					break;
 			}
+		}
+		else if (Atoms::xDndEnter.valid () && event.type == Atoms::xDndEnter ())
+		{
+			dndHandler.enter (event, proxyId ? proxyId : window.getID ());
+		}
+		else if (Atoms::xDndPosition.valid () && event.type == Atoms::xDndPosition ())
+		{
+			dndHandler.position (event);
+		}
+		else if (Atoms::xDndLeave.valid () && event.type == Atoms::xDndLeave ())
+		{
+			dndHandler.leave (event);
+		}
+		else if (Atoms::xDndDrop.valid () && event.type == Atoms::xDndDrop ())
+		{
+			dndHandler.drop (event);
 		}
 	}
 };
@@ -724,7 +733,7 @@ SharedPointer<COffscreenContext> Frame::createOffscreenContext (CCoord width, CC
 																double scaleFactor)
 {
 	CPoint size (width * scaleFactor, height * scaleFactor);
-	auto bitmap = new Cairo::Bitmap (&size);
+	auto bitmap = new Cairo::Bitmap (size);
 	bitmap->setScaleFactor (scaleFactor);
 	auto context = owned (new Cairo::Context (bitmap));
 	bitmap->forget ();
@@ -763,7 +772,7 @@ SharedPointer<IDataPackage> Frame::getClipboard ()
 //------------------------------------------------------------------------
 PlatformType Frame::getPlatformType () const
 {
-	return kX11EmbedWindowID;
+	return PlatformType::kX11EmbedWindowID;
 }
 
 //------------------------------------------------------------------------
@@ -785,7 +794,7 @@ bool Frame::setupGenericOptionMenu (bool use, GenericOptionMenuTheme* theme)
 
 //------------------------------------------------------------------------
 Frame::CreateIResourceInputStreamFunc Frame::createResourceInputStreamFunc =
-	[] (const CResourceDescription& desc) -> IPlatformResourceInputStream::Ptr {
+	[] (const CResourceDescription& desc) -> PlatformResourceInputStreamPtr {
 	if (desc.type != CResourceDescription::kStringType)
 		return nullptr;
 	auto path = Platform::getInstance ().getPath ();
@@ -812,34 +821,4 @@ UTF8String Frame::userDefinedResourcePath;
 
 //------------------------------------------------------------------------
 } // X11
-
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
-IPlatformFrame* IPlatformFrame::createPlatformFrame (IPlatformFrameCallback* frame,
-													 const CRect& size, void* parent,
-													 PlatformType parentType,
-													 IPlatformFrameConfig* config)
-{
-	if (parentType == kDefaultNative || parentType == kX11EmbedWindowID)
-	{
-		auto x11Parent = reinterpret_cast<XID> (parent);
-		return new X11::Frame (frame, size, x11Parent, config);
-	}
-	return nullptr;
-}
-
-//------------------------------------------------------------------------
-uint32_t IPlatformFrame::getTicks ()
-{
-	return static_cast<uint32_t> (X11::Platform::getCurrentTimeMs ());
-}
-
-//------------------------------------------------------------------------
-auto IPlatformResourceInputStream::create (const CResourceDescription& desc) -> Ptr
-{
-	return X11::Frame::createResourceInputStreamFunc (desc);
-}
-
-//------------------------------------------------------------------------
 } // VSTGUI
