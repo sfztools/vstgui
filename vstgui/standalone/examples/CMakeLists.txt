@@ -6,3 +6,5 @@ if(NOT MSVC_TOOLSET_VERSION OR MSVC_TOOLSET_VERSION VERSION_GREATER 140)
 endif()
 add_subdirectory(simple_standalone)
 add_subdirectory(standalone)
+
+add_subdirectory(drawing)

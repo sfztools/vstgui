@@ -1,0 +1,30 @@
+{
+	"vstgui-ui-description": {
+		"version": "1",
+		"variables": {},
+		"bitmaps": {},
+		"fonts": {},
+		"colors": {},
+		"control-tags": {},
+		"custom": {
+		},
+		"templates": {
+			"Window": {
+				"attributes": {
+					"autosize": "left right top bottom ",
+					"background-color": "~ BlackCColor",
+					"background-color-draw-style": "filled and stroked",
+					"class": "CViewContainer",
+					"mouse-enabled": "true",
+					"opacity": "1",
+					"origin": "0, 0",
+					"size": "800, 800",
+					"transparent": "false",
+					"wants-focus": "false"
+				},
+				"children": {
+				}
+			}
+		}
+	}
+}
