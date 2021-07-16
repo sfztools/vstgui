@@ -3,7 +3,6 @@
 // distribution and at http://github.com/steinbergmedia/vstgui/LICENSE
 
 #include "../../cfileselector.h"
-#include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <signal.h>
