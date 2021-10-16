@@ -18,15 +18,14 @@ extern "C" { extern char **environ; }
 namespace VSTGUI {
 namespace X11 {
 
-static constexpr auto kdialogpath = "/usr/bin/kdialog";
-static constexpr auto zenitypath = "/usr/bin/zenity";
+static constexpr auto kdialogpath = "kdialog";
+static constexpr auto zenitypath = "zenity";
 
 //------------------------------------------------------------------------
 struct FileSelector : CNewFileSelector
 {
 	FileSelector (CFrame* parent, Style style) : CNewFileSelector (parent), style (style)
 	{
-		identifiyExDialogType ();
 	}
 
 	~FileSelector ()
@@ -37,15 +36,12 @@ struct FileSelector : CNewFileSelector
 	bool runInternal (CBaseObject* delegate) override
 	{
 		this->delegate = delegate;
-		switch (exDialogType)
-		{
-			case ExDialogType::kdialog:
-				return runKDialog ();
-			case ExDialogType::zenity:
-				return runZenity ();
-			case ExDialogType::none:
-				break;
-		}
+		if (runZenity())
+			return true;
+
+		if (runKDialog())
+			return true;
+
 		return false;
 	}
 
@@ -87,14 +83,6 @@ private:
 		kdialog,
 		zenity
 	};
-
-	void identifiyExDialogType ()
-	{
-		if (access (zenitypath, X_OK) != -1)
-			exDialogType = ExDialogType::zenity;
-		if (access (kdialogpath, X_OK) != -1)
-			exDialogType = ExDialogType::kdialog;
-	}
 
 	bool runKDialog ()
 	{
@@ -196,7 +184,9 @@ private:
 			return false;
 
 		if (forkPid == 0) {
-			execute (argv, envp, rw.fd);
+			if (!execute (argv, envp, rw.fd))
+				return false;
+
 			assert (false);
 		}
 
@@ -210,15 +200,17 @@ private:
 		return true;
 	}
 
-	[[noreturn]]
-	static void execute (char* argv[], char* envp[], const int pipeFd[2])
+	static bool execute (char* argv[], char* envp[], const int pipeFd[2])
 	{
 		close (pipeFd[0]);
 		if (dup2 (pipeFd[1], STDOUT_FILENO) == -1)
 			_exit (1);
 		close (pipeFd[1]);
-		execve (argv[0], argv, envp);
+		if (execvpe (argv[0], argv, envp) == -1)
+			return false;
+
 		_exit (1);
+		return true; // not reachable
 	}
 
 	void closeProcess ()
