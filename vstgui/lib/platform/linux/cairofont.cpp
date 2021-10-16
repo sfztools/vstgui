@@ -11,6 +11,7 @@
 #include <pango/pango-features.h>
 #include <pango/pangofc-fontmap.h>
 #include <fontconfig/fontconfig.h>
+#include <dlfcn.h>
 
 //------------------------------------------------------------------------
 namespace VSTGUI {
@@ -142,6 +143,21 @@ struct Font::Impl
 	CCoord capHeight {-1.};
 };
 
+// TODO: Remove when Ardour updates their pango version
+typedef int(*pangoHeightFuncPointer)(PangoFontMetrics*);
+auto get_height_function() -> pangoHeightFuncPointer
+{
+	static pangoHeightFuncPointer f = [] () -> pangoHeightFuncPointer {
+		void *dlh = dlopen("libpango-1.0.so.0", RTLD_LAZY|RTLD_NOLOAD);
+		if (!dlh)
+			return nullptr;
+		void* f = dlsym(dlh, "pango_font_metrics_get_height");
+		dlclose(dlh);
+		return (pangoHeightFuncPointer) f;
+	}();
+	return f;
+}
+
 //------------------------------------------------------------------------
 Font::Font (UTF8StringPtr name, const CCoord& size, const int32_t& style)
 {
@@ -156,12 +172,12 @@ Font::Font (UTF8StringPtr name, const CCoord& size, const int32_t& style)
 		{
 			impl->ascent = pango_units_to_double (pango_font_metrics_get_ascent (metrics));
 			impl->descent = pango_units_to_double (pango_font_metrics_get_descent (metrics));
-#if (PANGO_VERSION_MAJOR > 1) || ((PANGO_VERSION_MAJOR == 1) && PANGO_VERSION_MINOR >= 44)
-			auto height = pango_units_to_double (pango_font_metrics_get_height (metrics));
-			impl->leading = height - (impl->ascent + impl->descent);
-#else
-			impl->leading = 0.;
-#endif
+			if (auto pango_get_height = get_height_function()) {
+				auto height = pango_units_to_double (pango_get_height (metrics));
+				impl->leading = height - (impl->ascent + impl->descent);
+			} else {
+				impl->leading = 0.;
+			}
 			pango_font_metrics_unref (metrics);
 		}
 
